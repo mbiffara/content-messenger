@@ -1,0 +1,72 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+model Subscriber {
+  id              String   @id @default(cuid())
+  email           String   @unique
+  name            String?
+  phone           String?
+  ghostId         String?  @unique
+  note            String?
+  active          Boolean  @default(true)
+  currentPosition Int      @default(0)
+  startedAt       DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  deliveries      Delivery[]
+}
+
+model Lesson {
+  id         String   @id @default(cuid())
+  title      String
+  audioUrl   String?
+  body       String?
+  imageUrl   String?
+  position   Int
+  status     String   @default("draft") // "draft" | "published"
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  deliveries Delivery[]
+}
+
+model Broadcast {
+  id          String    @id @default(cuid())
+  title       String
+  body        String?
+  imageUrl    String?
+  status      String    @default("draft") // "draft" | "scheduled" | "sent"
+  scheduledAt DateTime?
+  sentAt      DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  deliveries  Delivery[]
+}
+
+model Delivery {
+  id            String     @id @default(cuid())
+  subscriberId  String
+  lessonId      String?
+  broadcastId   String?
+  status        String     @default("pending") // "pending" | "sent" | "delivered" | "failed"
+  whatsappMsgId String?
+  sentAt        DateTime?
+  createdAt     DateTime   @default(now())
+  subscriber    Subscriber @relation(fields: [subscriberId], references: [id])
+  lesson        Lesson?    @relation(fields: [lessonId], references: [id])
+  broadcast     Broadcast? @relation(fields: [broadcastId], references: [id])
+
+  @@unique([lessonId, subscriberId])
+  @@unique([broadcastId, subscriberId])
+}
+
+model Setting {
+  key       String   @id
+  value     String
+  updatedAt DateTime @updatedAt
+}
