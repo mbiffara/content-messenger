@@ -2,8 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { sendTextMessage, sendMediaMessage } from "@/lib/whatsapp";
 
-function isLessonDeliveryTime(deliveryTime: string, timezone: string): boolean {
-  // deliveryTime is "HH:MM", timezone is IANA like "America/Argentina/Buenos_Aires"
+function isPastDeliveryTime(deliveryTime: string, timezone: string): boolean {
   const now = new Date();
   const formatter = new Intl.DateTimeFormat("en-US", {
     timeZone: timezone,
@@ -14,9 +13,35 @@ function isLessonDeliveryTime(deliveryTime: string, timezone: string): boolean {
   const parts = formatter.formatToParts(now);
   const currentHour = parts.find((p) => p.type === "hour")?.value || "00";
   const currentMinute = parts.find((p) => p.type === "minute")?.value || "00";
-  const currentTime = `${currentHour}:${currentMinute}`;
+  const currentMinutes = parseInt(currentHour) * 60 + parseInt(currentMinute);
 
-  return currentTime === deliveryTime;
+  const [targetH, targetM] = deliveryTime.split(":").map(Number);
+  const targetMinutes = targetH * 60 + targetM;
+
+  return currentMinutes >= targetMinutes;
+}
+
+function getTodayStart(timezone: string): Date {
+  // Get today's date in the account's timezone, then convert to UTC start
+  const now = new Date();
+  const formatter = new Intl.DateTimeFormat("en-US", {
+    timeZone: timezone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  });
+  const parts = formatter.formatToParts(now);
+  const month = parts.find((p) => p.type === "month")?.value || "01";
+  const day = parts.find((p) => p.type === "day")?.value || "01";
+  const year = parts.find((p) => p.type === "year")?.value || "2026";
+  // Create a date string and parse it in the timezone
+  const dateStr = `${year}-${month}-${day}T00:00:00`;
+  // Approximate: use the offset to get UTC midnight for this timezone
+  const tzDate = new Date(dateStr);
+  const utcDate = new Date(tzDate.toLocaleString("en-US", { timeZone: "UTC" }));
+  const tzLocal = new Date(tzDate.toLocaleString("en-US", { timeZone: timezone }));
+  const offset = utcDate.getTime() - tzLocal.getTime();
+  return new Date(tzDate.getTime() + offset);
 }
 
 async function getAccountSetting(accountId: string, key: string): Promise<string | null> {
@@ -46,15 +71,30 @@ export async function GET(req: NextRequest) {
     // --- Sequence-based lesson delivery ---
     const deliveryTime = await getAccountSetting(account.id, "lesson_delivery_time");
     const timezone = await getAccountSetting(account.id, "lesson_delivery_timezone") || "UTC";
-    const shouldSendLessons = deliveryTime ? isLessonDeliveryTime(deliveryTime, timezone) : false;
+
+    // Only send if we're past the configured delivery time for today
+    const shouldSendLessons = deliveryTime ? isPastDeliveryTime(deliveryTime, timezone) : false;
 
     const subscribers = await prisma.subscriber.findMany({
       where: { accountId: account.id, active: true, phone: { not: null } },
     });
 
     if (shouldSendLessons) {
+      const todayStart = getTodayStart(timezone);
+
       for (const sub of subscribers) {
         if (!sub.phone) continue;
+
+        // Check if this subscriber already received a lesson today
+        const alreadySentToday = await prisma.delivery.findFirst({
+          where: {
+            subscriberId: sub.id,
+            lessonId: { not: null },
+            status: "sent",
+            sentAt: { gte: todayStart },
+          },
+        });
+        if (alreadySentToday) continue;
 
         // Find the next published lesson for this subscriber
         const nextLesson = await prisma.lesson.findFirst({
