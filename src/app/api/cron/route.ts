@@ -105,7 +105,7 @@ export async function GET(req: NextRequest) {
             accountId: account.id,
             status: "published",
             position: { gt: sub.currentPosition },
-            deliveries: { none: { subscriberId: sub.id } },
+            deliveries: { none: { subscriberId: sub.id, status: "sent" } },
           },
           orderBy: { position: "asc" },
         });
@@ -113,6 +113,11 @@ export async function GET(req: NextRequest) {
         if (!nextLesson) continue;
 
         try {
+          // Remove any previous failed delivery for this lesson+subscriber
+          await prisma.delivery.deleteMany({
+            where: { lessonId: nextLesson.id, subscriberId: sub.id, status: "failed" },
+          });
+
           // Send text/image first if present
           if (nextLesson.body || nextLesson.imageUrl) {
             if (nextLesson.imageUrl) {
