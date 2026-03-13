@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useState, useRef } from "react";
-import { useSession } from "next-auth/react";
 
 interface Subscriber {
   id: string;
@@ -16,9 +15,6 @@ interface Subscriber {
 }
 
 export default function SubscribersPage() {
-  const { data: session } = useSession();
-  const canSync = session?.user?.role === "super_admin" || session?.user?.role === "account_admin";
-
   const [subscribers, setSubscribers] = useState<Subscriber[]>([]);
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
