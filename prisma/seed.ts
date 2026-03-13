@@ -1,13 +1,17 @@
+import { config } from "dotenv";
+config(); // Load .env file
+
 import { PrismaClient } from "../src/generated/prisma/client";
 import { PrismaLibSql } from "@prisma/adapter-libsql";
 import bcrypt from "bcryptjs";
 import path from "path";
 
-// Resolve DB path: libsql needs file: URL relative to cwd or absolute
-const dbUrl = process.env.DATABASE_URL || "file:./prisma/dev.db";
-const dbPath = dbUrl.replace(/^file:/, "");
-const absolutePath = path.isAbsolute(dbPath) ? dbPath : path.resolve(process.cwd(), dbPath);
-const adapter = new PrismaLibSql({ url: `file:${absolutePath}` });
+// Resolve to absolute file: URL for libsql
+const raw = process.env.DATABASE_URL || "file:./dev.db";
+const dbPath = raw.replace(/^file:/, "");
+const absPath = path.isAbsolute(dbPath) ? dbPath : path.resolve(process.cwd(), dbPath);
+const url = `file:${absPath}`;
+const adapter = new PrismaLibSql({ url });
 const prisma = new PrismaClient({ adapter });
 
 async function main() {
