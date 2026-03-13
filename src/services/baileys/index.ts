@@ -108,9 +108,22 @@ cron.schedule("* * * * *", async () => {
   }
 });
 
+// Run every hour — sync Stripe subscribers for all configured accounts
+cron.schedule("0 * * * *", async () => {
+  try {
+    const res = await fetch(`${APP_URL}/api/cron/sync`, {
+      headers: { Authorization: `Bearer ${CRON_SECRET}` },
+    });
+    const data = await res.json();
+    console.log(`[sync] status=${res.status}`, JSON.stringify(data));
+  } catch (err) {
+    console.error("[sync] Failed to call sync endpoint:", err);
+  }
+});
+
 app.listen(PORT, async () => {
   console.log(`Baileys service running on http://localhost:${PORT}`);
-  console.log("Scheduler: running cron every minute");
+  console.log("Scheduler: delivery cron every minute, sync cron every hour");
 
   // Auto-reconnect sessions that have saved auth state
   const sessions = manager.listSessions();
