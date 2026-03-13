@@ -84,6 +84,13 @@ async function syncStripeForAccount(accountId: string, accountName: string) {
     data: { active: true },
   });
 
+  // Save last synced timestamp
+  await prisma.setting.upsert({
+    where: { accountId_key: { accountId, key: "last_synced_at" } },
+    create: { accountId, key: "last_synced_at", value: new Date().toISOString() },
+    update: { value: new Date().toISOString() },
+  });
+
   console.log(`[sync] Account "${accountName}": ${customers.length} customers, ${created} created, ${updated} updated, ${deactivated} deactivated`);
   return { synced: customers.length, created, updated, deactivated };
 }

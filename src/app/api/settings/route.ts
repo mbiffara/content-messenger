@@ -14,6 +14,7 @@ const ALLOWED_KEYS = [
   "greeting_enabled",
   "lesson_delivery_time",
   "lesson_delivery_timezone",
+  "last_synced_at",
 ];
 
 const STRIPE_KEYS = ["stripe_api_key", "stripe_product_id"];

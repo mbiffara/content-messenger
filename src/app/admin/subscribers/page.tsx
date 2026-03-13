@@ -38,6 +38,13 @@ export default function SubscribersPage() {
 
   useEffect(() => {
     fetchSubscribers();
+    // Load last synced time from settings
+    fetch("/api/settings")
+      .then((r) => r.json())
+      .then((data) => {
+        if (data.last_synced_at) setLastSynced(new Date(data.last_synced_at));
+      })
+      .catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -131,7 +138,9 @@ export default function SubscribersPage() {
             }
             if (data.done) {
               setSyncResult(`Synced ${data.synced} members (${data.created} new, ${data.updated} updated, ${data.deactivated || 0} deactivated)`);
-              setLastSynced(new Date());
+              const now = new Date();
+              setLastSynced(now);
+              saveLastSynced(now);
               fetchSubscribers();
             }
             if (data.error) {
@@ -143,7 +152,9 @@ export default function SubscribersPage() {
         const data = await res.json();
         if (res.ok) {
           setSyncResult(`Synced ${data.synced} members (${data.created} new, ${data.updated} updated)`);
-          setLastSynced(new Date());
+          const now = new Date();
+          setLastSynced(now);
+          saveLastSynced(now);
           fetchSubscribers();
         } else {
           setSyncResult(data.error || "Sync failed");
@@ -175,12 +186,24 @@ export default function SubscribersPage() {
     fetchSubscribers();
   }
 
+  function saveLastSynced(date: Date) {
+    fetch("/api/settings", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ key: "last_synced_at", value: date.toISOString() }),
+    }).catch(() => {});
+  }
+
   function formatLastSynced() {
     if (!lastSynced) return null;
     const diff = Math.floor((Date.now() - lastSynced.getTime()) / 60000);
     if (diff < 1) return "just now";
     if (diff === 1) return "1 min ago";
-    return `${diff} min ago`;
+    if (diff < 60) return `${diff} min ago`;
+    const hours = Math.floor(diff / 60);
+    if (hours === 1) return "1 hour ago";
+    if (hours < 24) return `${hours} hours ago`;
+    return lastSynced.toLocaleDateString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
   }
 
   const filtered = subscribers

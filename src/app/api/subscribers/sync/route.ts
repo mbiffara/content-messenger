@@ -72,6 +72,13 @@ async function syncGhost(accountId: string) {
     }
   }
 
+  // Save last synced timestamp
+  await prisma.setting.upsert({
+    where: { accountId_key: { accountId, key: "last_synced_at" } },
+    create: { accountId, key: "last_synced_at", value: new Date().toISOString() },
+    update: { value: new Date().toISOString() },
+  });
+
   return { synced: members.length, created, updated };
 }
 
@@ -172,6 +179,13 @@ async function syncStripe(accountId: string, send: (step: string) => void) {
   await prisma.subscriber.updateMany({
     where: { accountId, email: { in: Array.from(syncedEmails) }, active: false },
     data: { active: true },
+  });
+
+  // Save last synced timestamp
+  await prisma.setting.upsert({
+    where: { accountId_key: { accountId, key: "last_synced_at" } },
+    create: { accountId, key: "last_synced_at", value: new Date().toISOString() },
+    update: { value: new Date().toISOString() },
   });
 
   return { synced: customers.length, created, updated, deactivated };
