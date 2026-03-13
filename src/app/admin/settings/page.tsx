@@ -386,7 +386,15 @@ export default function SettingsPage() {
               </p>
             </div>
             <button
-              onClick={() => setGreetingEnabled(!greetingEnabled)}
+              onClick={async () => {
+                const newValue = !greetingEnabled;
+                setGreetingEnabled(newValue);
+                await fetch("/api/settings", {
+                  method: "PUT",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ greeting_enabled: newValue ? "true" : "false" }),
+                });
+              }}
               className={`relative w-11 h-6 rounded-full transition-colors flex-shrink-0 ${
                 greetingEnabled ? "bg-sage" : "bg-[#D8D8D4]"
               }`}
