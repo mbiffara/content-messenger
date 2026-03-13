@@ -14,7 +14,10 @@ export async function GET(
     where: { id, accountId: auth.accountId },
     include: {
       deliveries: {
-        include: { subscriber: { select: { id: true, name: true, email: true, phone: true } } },
+        include: {
+          subscriber: { select: { id: true, name: true, email: true, phone: true } },
+          logs: { orderBy: { createdAt: "desc" } },
+        },
         orderBy: { createdAt: "desc" },
       },
     },

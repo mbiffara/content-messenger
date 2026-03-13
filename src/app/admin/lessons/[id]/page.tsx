@@ -3,12 +3,20 @@
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
-import { ChevronLeft, ImageIcon, Music, Volume2, CheckCircle, XCircle, Clock } from "lucide-react";
+import { ChevronLeft, ImageIcon, Music, Volume2, CheckCircle, XCircle, Clock, RotateCw } from "lucide-react";
+
+interface DeliveryLog {
+  id: string;
+  event: string;
+  detail: string | null;
+  createdAt: string;
+}
 
 interface Delivery {
   id: string;
   status: string;
   sentAt: string | null;
+  logs: DeliveryLog[];
   subscriber: {
     id: string;
     name: string | null;
@@ -33,6 +41,7 @@ export default function LessonDetailPage() {
   const params = useParams();
   const [lesson, setLesson] = useState<Lesson | null>(null);
   const [loading, setLoading] = useState(true);
+  const [retrying, setRetrying] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     fetch(`/api/lessons/${params.id}`)
@@ -40,6 +49,43 @@ export default function LessonDetailPage() {
       .then(setLesson)
       .finally(() => setLoading(false));
   }, [params.id]);
+
+  const reload = () => {
+    fetch(`/api/lessons/${params.id}`)
+      .then((r) => r.json())
+      .then(setLesson);
+  };
+
+  const retryOne = async (deliveryId: string) => {
+    setRetrying((s) => new Set(s).add(deliveryId));
+    try {
+      await fetch("/api/deliveries/retry", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ deliveryIds: [deliveryId] }),
+      });
+      reload();
+    } finally {
+      setRetrying((s) => { const n = new Set(s); n.delete(deliveryId); return n; });
+    }
+  };
+
+  const retryAllFailed = async () => {
+    if (!lesson) return;
+    const failedIds = lesson.deliveries.filter((d) => d.status === "failed").map((d) => d.id);
+    if (failedIds.length === 0) return;
+    setRetrying(new Set(failedIds));
+    try {
+      await fetch("/api/deliveries/retry", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ deliveryIds: failedIds }),
+      });
+      reload();
+    } finally {
+      setRetrying(new Set());
+    }
+  };
 
   if (loading) {
     return <div className="text-muted">Loading...</div>;
@@ -52,6 +98,10 @@ export default function LessonDetailPage() {
   const sentCount = lesson.deliveries.filter((d) => d.status === "sent" || d.status === "delivered").length;
   const failedCount = lesson.deliveries.filter((d) => d.status === "failed").length;
   const pendingCount = lesson.deliveries.filter((d) => d.status === "pending").length;
+
+  const allLogs = lesson.deliveries
+    .flatMap((d) => d.logs.map((log) => ({ ...log, subscriberName: d.subscriber.name || d.subscriber.email })))
+    .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
 
   return (
     <div>
@@ -147,9 +197,21 @@ export default function LessonDetailPage() {
 
       {/* Recipients table */}
       <div>
-        <h3 className="text-[13px] font-semibold text-muted uppercase tracking-wider mb-3">
-          Recipients ({lesson.deliveries.length})
-        </h3>
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="text-[13px] font-semibold text-muted uppercase tracking-wider">
+            Recipients ({lesson.deliveries.length})
+          </h3>
+          {failedCount > 0 && (
+            <button
+              onClick={retryAllFailed}
+              disabled={retrying.size > 0}
+              className="inline-flex items-center gap-1.5 text-xs font-medium text-terracotta hover:text-terracotta/80 disabled:opacity-50 transition-colors"
+            >
+              <RotateCw size={13} className={retrying.size > 0 ? "animate-spin" : ""} />
+              Retry All Failed ({failedCount})
+            </button>
+          )}
+        </div>
         <div className="bg-white rounded-xl border border-border-light overflow-hidden">
           {/* Header */}
           <div className="flex items-center px-5 py-3 border-b border-border-light">
@@ -157,7 +219,8 @@ export default function LessonDetailPage() {
             <span className="w-[240px] shrink-0 text-[11px] font-semibold text-muted uppercase tracking-wider">Email</span>
             <span className="w-[150px] shrink-0 text-[11px] font-semibold text-muted uppercase tracking-wider">Phone</span>
             <span className="w-[100px] shrink-0 text-[11px] font-semibold text-muted uppercase tracking-wider">Status</span>
-            <span className="flex-1 text-[11px] font-semibold text-muted uppercase tracking-wider">Sent at</span>
+            <span className="w-[150px] shrink-0 text-[11px] font-semibold text-muted uppercase tracking-wider">Sent at</span>
+            <span className="flex-1 text-[11px] font-semibold text-muted uppercase tracking-wider"></span>
           </div>
 
           {/* Rows */}
@@ -208,7 +271,7 @@ export default function LessonDetailPage() {
               </div>
 
               {/* Sent at */}
-              <span className="flex-1 text-[13px] text-muted">
+              <span className="w-[150px] shrink-0 text-[13px] text-muted">
                 {d.sentAt
                   ? new Date(d.sentAt).toLocaleDateString("en-US", {
                       month: "short", day: "numeric",
@@ -217,6 +280,20 @@ export default function LessonDetailPage() {
                     })
                   : "—"}
               </span>
+
+              {/* Actions */}
+              <div className="flex-1">
+                {d.status === "failed" && (
+                  <button
+                    onClick={() => retryOne(d.id)}
+                    disabled={retrying.has(d.id)}
+                    className="inline-flex items-center gap-1 text-xs font-medium text-terracotta hover:text-terracotta/80 disabled:opacity-50 transition-colors"
+                  >
+                    <RotateCw size={12} className={retrying.has(d.id) ? "animate-spin" : ""} />
+                    Retry
+                  </button>
+                )}
+              </div>
             </div>
           ))}
 
@@ -227,6 +304,39 @@ export default function LessonDetailPage() {
           )}
         </div>
       </div>
+
+      {/* Activity Log */}
+      {allLogs.length > 0 && (
+        <div className="mt-8">
+          <h3 className="text-[13px] font-semibold text-muted uppercase tracking-wider mb-3">
+            Activity Log
+          </h3>
+          <div className="bg-white rounded-xl border border-border-light overflow-hidden">
+            {allLogs.map((log) => (
+              <div key={log.id} className="flex items-start gap-3 px-5 py-3 border-b border-border-light last:border-b-0">
+                <div className={`mt-0.5 w-2 h-2 rounded-full shrink-0 ${
+                  log.event === "sent" ? "bg-sage" : log.event === "failed" ? "bg-terracotta" : "bg-muted"
+                }`} />
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2">
+                    <span className="text-[13px] font-medium text-ink capitalize">{log.event}</span>
+                    {log.subscriberName && (
+                      <span className="text-[12px] text-muted">— {log.subscriberName}</span>
+                    )}
+                  </div>
+                  {log.detail && (
+                    <p className="text-[12px] text-muted mt-0.5 truncate">{log.detail}</p>
+                  )}
+                </div>
+                <span className="text-[11px] text-muted shrink-0">
+                  {new Date(log.createdAt).toLocaleDateString("en-US", { month: "short", day: "numeric" })}{" "}
+                  {new Date(log.createdAt).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", second: "2-digit" })}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -129,7 +129,7 @@ export async function GET(req: NextRequest) {
             messageId = result.messageId;
           }
 
-          await prisma.delivery.create({
+          const delivery = await prisma.delivery.create({
             data: {
               accountId: account.id,
               lessonId: nextLesson.id,
@@ -140,6 +140,10 @@ export async function GET(req: NextRequest) {
             },
           });
 
+          await prisma.deliveryLog.create({
+            data: { deliveryId: delivery.id, event: "sent", detail: `Lesson "${nextLesson.title}" delivered via cron` },
+          });
+
           await prisma.subscriber.update({
             where: { id: sub.id },
             data: { currentPosition: nextLesson.position },
@@ -148,14 +152,18 @@ export async function GET(req: NextRequest) {
           lessonsSent++;
           console.log(`[cron] Sent lesson "${nextLesson.title}" to ${sub.email} (${sub.phone})`);
         } catch (err) {
+          const errorMsg = err instanceof Error ? err.message : String(err);
           console.error(`[cron] Failed lesson "${nextLesson.title}" to ${sub.email} (${sub.phone}):`, err);
-          await prisma.delivery.create({
+          const delivery = await prisma.delivery.create({
             data: {
               accountId: account.id,
               lessonId: nextLesson.id,
               subscriberId: sub.id,
               status: "failed",
             },
+          });
+          await prisma.deliveryLog.create({
+            data: { deliveryId: delivery.id, event: "failed", detail: errorMsg },
           });
           failures++;
         }
@@ -187,7 +195,7 @@ export async function GET(req: NextRequest) {
             messageId = result.messageId;
           }
 
-          await prisma.delivery.create({
+          const delivery = await prisma.delivery.create({
             data: {
               accountId: account.id,
               broadcastId: bc.id,
@@ -198,17 +206,25 @@ export async function GET(req: NextRequest) {
             },
           });
 
+          await prisma.deliveryLog.create({
+            data: { deliveryId: delivery.id, event: "sent", detail: `Broadcast "${bc.title}" delivered via cron` },
+          });
+
           broadcastsSent++;
           console.log(`[cron] Sent broadcast "${bc.title}" to ${sub.email} (${sub.phone})`);
         } catch (err) {
+          const errorMsg = err instanceof Error ? err.message : String(err);
           console.error(`[cron] Failed broadcast "${bc.title}" to ${sub.email} (${sub.phone}):`, err);
-          await prisma.delivery.create({
+          const delivery = await prisma.delivery.create({
             data: {
               accountId: account.id,
               broadcastId: bc.id,
               subscriberId: sub.id,
               status: "failed",
             },
+          });
+          await prisma.deliveryLog.create({
+            data: { deliveryId: delivery.id, event: "failed", detail: errorMsg },
           });
           failures++;
         }

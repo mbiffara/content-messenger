@@ -99,22 +99,32 @@ model Broadcast {
 }
 
 model Delivery {
-  id            String     @id @default(cuid())
+  id            String        @id @default(cuid())
   accountId     String
   subscriberId  String
   lessonId      String?
   broadcastId   String?
-  status        String     @default("pending") // "pending" | "sent" | "delivered" | "failed"
+  status        String        @default("pending") // "pending" | "sent" | "delivered" | "failed"
   whatsappMsgId String?
   sentAt        DateTime?
-  createdAt     DateTime   @default(now())
-  account       Account    @relation(fields: [accountId], references: [id])
-  subscriber    Subscriber @relation(fields: [subscriberId], references: [id])
-  lesson        Lesson?    @relation(fields: [lessonId], references: [id])
-  broadcast     Broadcast? @relation(fields: [broadcastId], references: [id])
+  createdAt     DateTime      @default(now())
+  account       Account       @relation(fields: [accountId], references: [id])
+  subscriber    Subscriber    @relation(fields: [subscriberId], references: [id])
+  lesson        Lesson?       @relation(fields: [lessonId], references: [id])
+  broadcast     Broadcast?    @relation(fields: [broadcastId], references: [id])
+  logs          DeliveryLog[]
 
   @@unique([lessonId, subscriberId])
   @@unique([broadcastId, subscriberId])
+}
+
+model DeliveryLog {
+  id         String   @id @default(cuid())
+  deliveryId String
+  event      String   // "attempted" | "sent" | "failed" | "retried"
+  detail     String?
+  createdAt  DateTime @default(now())
+  delivery   Delivery @relation(fields: [deliveryId], references: [id], onDelete: Cascade)
 }
 
 model Setting {
