@@ -99,22 +99,26 @@ cron.schedule("* * * * *", async () => {
       headers: { Authorization: `Bearer ${CRON_SECRET}` },
     });
     const data = await res.json();
-    if (data.lessonsSent || data.broadcastsSent || data.failures) {
-      console.log(`[cron] lessons=${data.lessonsSent} broadcasts=${data.broadcastsSent} failures=${data.failures}`);
-    }
+    console.log(`[cron] status=${res.status} lessons=${data.lessonsSent ?? 0} broadcasts=${data.broadcastsSent ?? 0} failures=${data.failures ?? 0}`);
   } catch (err) {
     console.error("[cron] Failed to call cron endpoint:", err);
   }
 });
 
-app.listen(PORT, () => {
+app.listen(PORT, async () => {
   console.log(`Baileys service running on http://localhost:${PORT}`);
   console.log("Scheduler: running cron every minute");
-  console.log("Endpoints:");
-  console.log("  GET    /sessions");
-  console.log("  GET    /sessions/:id/status");
-  console.log("  POST   /sessions/:id/connect");
-  console.log("  DELETE  /sessions/:id");
-  console.log("  POST   /sessions/:id/send");
-  console.log("  POST   /sessions/:id/send-media");
+
+  // Auto-reconnect sessions that have saved auth state
+  const sessions = manager.listSessions();
+  for (const session of sessions) {
+    if (session.status === "disconnected") {
+      console.log(`[startup] Auto-reconnecting session: ${session.id}`);
+      try {
+        await manager.connectSession(session.id);
+      } catch (err) {
+        console.error(`[startup] Failed to reconnect ${session.id}:`, err);
+      }
+    }
+  }
 });

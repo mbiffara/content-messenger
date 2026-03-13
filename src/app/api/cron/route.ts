@@ -65,6 +65,8 @@ export async function GET(req: NextRequest) {
   // Iterate all accounts
   const accounts = await prisma.account.findMany();
 
+  console.log(`[cron] Processing ${accounts.length} account(s)`);
+
   for (const account of accounts) {
     const sessionId = account.whatsappSessionId;
 
@@ -74,6 +76,7 @@ export async function GET(req: NextRequest) {
 
     // Only send if we're past the configured delivery time for today
     const shouldSendLessons = deliveryTime ? isPastDeliveryTime(deliveryTime, timezone) : false;
+    console.log(`[cron] Account "${account.name}" (${account.id}): deliveryTime=${deliveryTime} tz=${timezone} shouldSend=${shouldSendLessons}`);
 
     const subscribers = await prisma.subscriber.findMany({
       where: { accountId: account.id, active: true, phone: { not: null } },
@@ -143,7 +146,9 @@ export async function GET(req: NextRequest) {
           });
 
           lessonsSent++;
-        } catch {
+          console.log(`[cron] Sent lesson "${nextLesson.title}" to ${sub.email} (${sub.phone})`);
+        } catch (err) {
+          console.error(`[cron] Failed lesson "${nextLesson.title}" to ${sub.email} (${sub.phone}):`, err);
           await prisma.delivery.create({
             data: {
               accountId: account.id,
@@ -194,7 +199,9 @@ export async function GET(req: NextRequest) {
           });
 
           broadcastsSent++;
-        } catch {
+          console.log(`[cron] Sent broadcast "${bc.title}" to ${sub.email} (${sub.phone})`);
+        } catch (err) {
+          console.error(`[cron] Failed broadcast "${bc.title}" to ${sub.email} (${sub.phone}):`, err);
           await prisma.delivery.create({
             data: {
               accountId: account.id,
