@@ -135,21 +135,32 @@ export class SessionManager {
     }
 
     const jid = this.toJid(to);
+    const resolvedUrl = this.resolveMediaUrl(url);
 
     let result;
     if (type === "image") {
-      result = await session.socket.sendMessage(jid, { image: { url }, caption });
+      result = await session.socket.sendMessage(jid, { image: { url: resolvedUrl }, caption });
     } else if (type === "video") {
-      result = await session.socket.sendMessage(jid, { video: { url }, caption });
+      result = await session.socket.sendMessage(jid, { video: { url: resolvedUrl }, caption });
     } else if (type === "audio") {
       const ext = path.extname(url).toLowerCase();
       const mimetype = AUDIO_MIMETYPES[ext] || "audio/mpeg";
       const fileName = caption || `audio${ext}`;
-      result = await session.socket.sendMessage(jid, { document: { url }, mimetype, fileName });
+      result = await session.socket.sendMessage(jid, { document: { url: resolvedUrl }, mimetype, fileName });
     } else {
-      result = await session.socket.sendMessage(jid, { document: { url }, mimetype: "application/octet-stream", fileName: caption || "file" });
+      result = await session.socket.sendMessage(jid, { document: { url: resolvedUrl }, mimetype: "application/octet-stream", fileName: caption || "file" });
     }
     return { messageId: result?.key.id, to: jid };
+  }
+
+  private resolveMediaUrl(url: string): string {
+    // If it's a full URL (http/https), return as-is
+    if (url.startsWith("http://") || url.startsWith("https://")) return url;
+    // If it's a relative path like /uploads/xxx.jpg, resolve to public dir
+    if (url.startsWith("/uploads/")) {
+      return path.resolve(process.cwd(), "public", url.slice(1));
+    }
+    return url;
   }
 
   private toJid(phone: string): string {
