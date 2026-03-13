@@ -1,4 +1,4 @@
-const BAILEYS_URL = process.env.BAILEYS_URL || "http://localhost:3006";
+const BAILEYS_URL = process.env.BAILEYS_URL || "http://127.0.0.1:3006";
 
 interface SendMessageResult {
   messageId: string;
