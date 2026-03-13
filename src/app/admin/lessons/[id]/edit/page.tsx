@@ -1,7 +1,7 @@
 "use client";
 
-import { useState } from "react";
-import { useRouter } from "next/navigation";
+import { useEffect, useState } from "react";
+import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { ChevronLeft, Mic, ImageIcon, X, Music } from "lucide-react";
 
@@ -13,14 +13,34 @@ async function uploadFile(file: File): Promise<{ url: string; originalName: stri
   return res.json();
 }
 
-export default function NewLessonPage() {
+export default function EditLessonPage() {
+  const params = useParams();
   const router = useRouter();
   const [title, setTitle] = useState("");
   const [body, setBody] = useState("");
+  const [existingAudioUrl, setExistingAudioUrl] = useState<string | null>(null);
+  const [existingAudioName, setExistingAudioName] = useState<string | null>(null);
+  const [existingImageUrl, setExistingImageUrl] = useState<string | null>(null);
   const [audioFile, setAudioFile] = useState<File | null>(null);
   const [imageFile, setImageFile] = useState<File | null>(null);
+  const [removeAudio, setRemoveAudio] = useState(false);
+  const [removeImage, setRemoveImage] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    fetch(`/api/lessons/${params.id}`)
+      .then((r) => r.json())
+      .then((lesson) => {
+        setTitle(lesson.title);
+        setBody(lesson.body || "");
+        setExistingAudioUrl(lesson.audioUrl);
+        setExistingAudioName(lesson.audioFileName);
+        setExistingImageUrl(lesson.imageUrl);
+      })
+      .finally(() => setLoading(false));
+  }, [params.id]);
 
   async function handleSubmit(status: "draft" | "published") {
     if (!title.trim()) {
@@ -31,36 +51,45 @@ export default function NewLessonPage() {
     setError("");
 
     try {
-      let audioUrl: string | null = null;
-      let audioFileName: string | null = null;
-      let imageUrl: string | null = null;
+      let audioUrl: string | undefined = undefined;
+      let audioFileName: string | undefined = undefined;
+      let imageUrl: string | undefined = undefined;
 
       if (audioFile) {
         const result = await uploadFile(audioFile);
         audioUrl = result.url;
         audioFileName = result.originalName;
+      } else if (removeAudio) {
+        audioUrl = "";
+        audioFileName = "";
       }
+
       if (imageFile) {
         const result = await uploadFile(imageFile);
         imageUrl = result.url;
+      } else if (removeImage) {
+        imageUrl = "";
       }
 
+      const payload: Record<string, unknown> = {
+        id: params.id,
+        title,
+        body: body || null,
+        status,
+      };
+      if (audioUrl !== undefined) payload.audioUrl = audioUrl || null;
+      if (audioFileName !== undefined) payload.audioFileName = audioFileName || null;
+      if (imageUrl !== undefined) payload.imageUrl = imageUrl || null;
+
       const res = await fetch("/api/lessons", {
-        method: "POST",
+        method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          title,
-          body: body || null,
-          audioUrl,
-          audioFileName,
-          imageUrl,
-          status,
-        }),
+        body: JSON.stringify(payload),
       });
 
       if (!res.ok) {
         const data = await res.json();
-        setError(data.error || "Failed to create lesson");
+        setError(data.error || "Failed to save");
         setSaving(false);
         return;
       }
@@ -71,6 +100,13 @@ export default function NewLessonPage() {
       setSaving(false);
     }
   }
+
+  if (loading) {
+    return <div className="text-muted">Loading...</div>;
+  }
+
+  const hasAudio = (existingAudioUrl && !removeAudio) || audioFile;
+  const hasImage = (existingImageUrl && !removeImage) || imageFile;
 
   return (
     <div>
@@ -84,15 +120,12 @@ export default function NewLessonPage() {
           Lessons
         </Link>
         <span className="text-muted text-sm">/</span>
-        <span className="text-sm text-ink">New Lesson</span>
+        <span className="text-sm text-ink">Edit Lesson</span>
       </div>
 
       <div className="flex-1 max-w-[640px] space-y-6">
         <div>
-          <h2 className="font-display text-[28px] font-bold text-ink">New Lesson</h2>
-          <p className="text-muted text-sm mt-1">
-            This lesson will be added to the end of the sequence
-          </p>
+          <h2 className="font-display text-[28px] font-bold text-ink">Edit Lesson</h2>
         </div>
 
         {error && <p className="text-terracotta text-sm">{error}</p>}
@@ -116,11 +149,19 @@ export default function NewLessonPage() {
           <div className="flex items-center gap-1.5 mb-1.5">
             <label className="text-[13px] font-medium text-ink tracking-wide">Audio File</label>
           </div>
-          {audioFile ? (
+          {hasAudio ? (
             <div className="flex items-center gap-3 px-4 py-3 bg-white border border-border rounded-lg">
               <Music size={18} className="text-muted" strokeWidth={1.5} />
-              <span className="text-sm text-ink flex-1 truncate">{audioFile.name}</span>
-              <button onClick={() => setAudioFile(null)} className="text-muted hover:text-ink">
+              <span className="text-sm text-ink flex-1 truncate">
+                {audioFile ? audioFile.name : existingAudioName || existingAudioUrl?.split("/").pop()}
+              </span>
+              <button
+                onClick={() => {
+                  setAudioFile(null);
+                  if (existingAudioUrl) setRemoveAudio(true);
+                }}
+                className="text-muted hover:text-ink"
+              >
                 <X size={16} />
               </button>
             </div>
@@ -136,7 +177,10 @@ export default function NewLessonPage() {
                 type="file"
                 accept="audio/*"
                 className="hidden"
-                onChange={(e) => setAudioFile(e.target.files?.[0] || null)}
+                onChange={(e) => {
+                  setAudioFile(e.target.files?.[0] || null);
+                  setRemoveAudio(false);
+                }}
               />
             </label>
           )}
@@ -163,11 +207,19 @@ export default function NewLessonPage() {
             <label className="text-[13px] font-medium text-ink tracking-wide">Image</label>
             <span className="text-[11px] text-muted uppercase tracking-wider">Optional</span>
           </div>
-          {imageFile ? (
+          {hasImage ? (
             <div className="flex items-center gap-3 px-4 py-3 bg-white border border-border rounded-lg">
               <ImageIcon size={18} className="text-muted" strokeWidth={1.5} />
-              <span className="text-sm text-ink flex-1 truncate">{imageFile.name}</span>
-              <button onClick={() => setImageFile(null)} className="text-muted hover:text-ink">
+              <span className="text-sm text-ink flex-1 truncate">
+                {imageFile ? imageFile.name : existingImageUrl?.split("/").pop()}
+              </span>
+              <button
+                onClick={() => {
+                  setImageFile(null);
+                  if (existingImageUrl) setRemoveImage(true);
+                }}
+                className="text-muted hover:text-ink"
+              >
                 <X size={16} />
               </button>
             </div>
@@ -179,7 +231,10 @@ export default function NewLessonPage() {
                 type="file"
                 accept="image/*"
                 className="hidden"
-                onChange={(e) => setImageFile(e.target.files?.[0] || null)}
+                onChange={(e) => {
+                  setImageFile(e.target.files?.[0] || null);
+                  setRemoveImage(false);
+                }}
               />
             </label>
           )}

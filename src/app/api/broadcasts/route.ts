@@ -1,13 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
+import { getAuthContext } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 
 export async function GET() {
-  const session = await getServerSession(authOptions);
-  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const auth = await getAuthContext();
+  if (!auth) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const broadcasts = await prisma.broadcast.findMany({
+    where: { accountId: auth.accountId },
     orderBy: { createdAt: "desc" },
     include: { _count: { select: { deliveries: true } } },
   });
@@ -16,10 +16,10 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
-  const session = await getServerSession(authOptions);
-  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const auth = await getAuthContext();
+  if (!auth) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  const { title, body, status, scheduledAt } = await req.json();
+  const { title, body, imageUrl, audioUrl, audioFileName, status, scheduledAt } = await req.json();
 
   if (!title?.trim()) {
     return NextResponse.json({ error: "Title is required" }, { status: 400 });
@@ -27,8 +27,12 @@ export async function POST(req: NextRequest) {
 
   const broadcast = await prisma.broadcast.create({
     data: {
+      accountId: auth.accountId,
       title: title.trim(),
       body: body || null,
+      imageUrl: imageUrl || null,
+      audioUrl: audioUrl || null,
+      audioFileName: audioFileName || null,
       status: status || "draft",
       scheduledAt: scheduledAt ? new Date(scheduledAt) : null,
     },

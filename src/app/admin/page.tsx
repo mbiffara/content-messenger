@@ -1,35 +1,52 @@
 import { prisma } from "@/lib/prisma";
+import { getAuthContext } from "@/lib/auth";
+import { redirect } from "next/navigation";
 
 export const dynamic = "force-dynamic";
 
 export default async function DashboardPage() {
-  const [totalSubscribers, activeWithPhone, totalLessons, publishedLessons, totalBroadcasts, sentBroadcasts] =
+  const auth = await getAuthContext();
+  if (!auth) redirect("/login");
+
+  const accountId = auth.accountId;
+
+  const startOfMonth = new Date();
+  startOfMonth.setDate(1);
+  startOfMonth.setHours(0, 0, 0, 0);
+
+  const [totalSubscribers, broadcastsSentThisMonth, totalLessons, publishedLessons, totalBroadcasts, sentBroadcasts] =
     await Promise.all([
-      prisma.subscriber.count(),
-      prisma.subscriber.count({ where: { active: true, phone: { not: null } } }),
-      prisma.lesson.count(),
-      prisma.lesson.count({ where: { status: "published" } }),
-      prisma.broadcast.count(),
-      prisma.broadcast.count({ where: { status: "sent" } }),
+      prisma.subscriber.count({ where: { accountId } }),
+      prisma.broadcast.count({ where: { accountId, status: "sent", sentAt: { gte: startOfMonth } } }),
+      prisma.lesson.count({ where: { accountId } }),
+      prisma.lesson.count({ where: { accountId, status: "published" } }),
+      prisma.broadcast.count({ where: { accountId } }),
+      prisma.broadcast.count({ where: { accountId, status: "sent" } }),
     ]);
 
   const recentLessons = await prisma.lesson.findMany({
+    where: { accountId },
     orderBy: { position: "asc" },
     take: 5,
     include: { _count: { select: { deliveries: true } } },
   });
 
   const upcomingBroadcasts = await prisma.broadcast.findMany({
-    where: { status: { in: ["scheduled", "draft"] } },
+    where: { accountId, status: { in: ["scheduled", "draft"] } },
     orderBy: { scheduledAt: "asc" },
     take: 3,
   });
 
+  const account = await prisma.account.findUnique({
+    where: { id: accountId },
+    select: { name: true },
+  });
+
   const stats = [
-    { label: "Subscribers", value: totalSubscribers },
-    { label: "WhatsApp Ready", value: activeWithPhone },
-    { label: "Lessons Sent", value: publishedLessons, total: totalLessons },
-    { label: "Broadcasts Sent", value: sentBroadcasts, total: totalBroadcasts },
+    { label: "Subscribers", value: totalSubscribers, sub: `of ${totalSubscribers} total` },
+    { label: "Broadcasts Sent", value: broadcastsSentThisMonth, sub: "this month" },
+    { label: "Lessons Published", value: publishedLessons, sub: `of ${totalLessons} total` },
+    { label: "Total Broadcasts", value: totalBroadcasts, sub: `${sentBroadcasts} sent` },
   ];
 
   return (
@@ -37,7 +54,9 @@ export default async function DashboardPage() {
       <p className="text-muted text-sm mb-1">
         {new Date().toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}
       </p>
-      <h2 className="font-display text-[28px] font-bold text-ink">Dashboard</h2>
+      <h2 className="font-display text-[28px] font-bold text-ink">
+        {account?.name || "Dashboard"}
+      </h2>
 
       <div className="grid grid-cols-4 gap-4 mt-6 mb-8">
         {stats.map((stat) => (
@@ -48,8 +67,8 @@ export default async function DashboardPage() {
             <p className="text-sm text-muted">{stat.label}</p>
             <div className="flex items-baseline gap-2 mt-2">
               <p className="text-3xl font-bold text-ink">{stat.value}</p>
-              {"total" in stat && stat.total !== undefined && (
-                <span className="text-sm text-muted">of {stat.total}</span>
+              {stat.sub && (
+                <span className="text-sm text-sage">{stat.sub}</span>
               )}
             </div>
           </div>

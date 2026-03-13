@@ -1,17 +1,20 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
+import { getAuthContext } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 
 export async function POST(req: NextRequest) {
-  const session = await getServerSession(authOptions);
-  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const auth = await getAuthContext();
+  if (!auth) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const { provider } = await req.json();
 
   if (provider === "ghost") {
-    const apiUrl = (await prisma.setting.findUnique({ where: { key: "ghost_api_url" } }))?.value;
-    const apiKey = (await prisma.setting.findUnique({ where: { key: "ghost_admin_api_key" } }))?.value;
+    const apiUrl = (await prisma.setting.findUnique({
+      where: { accountId_key: { accountId: auth.accountId, key: "ghost_api_url" } },
+    }))?.value;
+    const apiKey = (await prisma.setting.findUnique({
+      where: { accountId_key: { accountId: auth.accountId, key: "ghost_admin_api_key" } },
+    }))?.value;
 
     if (!apiUrl || !apiKey) {
       return NextResponse.json({ ok: false, error: "Missing Ghost API URL or Admin API Key" });
@@ -46,8 +49,12 @@ export async function POST(req: NextRequest) {
   }
 
   if (provider === "stripe") {
-    const apiKey = (await prisma.setting.findUnique({ where: { key: "stripe_api_key" } }))?.value;
-    const productId = (await prisma.setting.findUnique({ where: { key: "stripe_product_id" } }))?.value;
+    const apiKey = (await prisma.setting.findUnique({
+      where: { accountId_key: { accountId: auth.accountId, key: "stripe_api_key" } },
+    }))?.value;
+    const productId = (await prisma.setting.findUnique({
+      where: { accountId_key: { accountId: auth.accountId, key: "stripe_product_id" } },
+    }))?.value;
 
     if (!apiKey || !productId) {
       return NextResponse.json({ ok: false, error: "Missing Stripe API Key or Product ID" });

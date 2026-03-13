@@ -2,7 +2,8 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { Plus, Megaphone, Clock, MessageSquare, Image } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { Plus, Megaphone, Clock, MessageSquare, Image, Send } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 
 interface Broadcast {
@@ -21,13 +22,41 @@ export default function BroadcastsPage() {
   const [loading, setLoading] = useState(true);
   const [sortNewest, setSortNewest] = useState(true);
   const [statusFilter, setStatusFilter] = useState("all");
+  const router = useRouter();
+  const [sendingId, setSendingId] = useState<string | null>(null);
+  const [sendResult, setSendResult] = useState<{ id: string; sent: number; failed: number } | null>(null);
 
-  useEffect(() => {
+  function fetchBroadcasts() {
     fetch("/api/broadcasts")
       .then((r) => r.json())
       .then(setBroadcasts)
       .finally(() => setLoading(false));
+  }
+
+  useEffect(() => {
+    fetchBroadcasts();
   }, []);
+
+  async function handleSend(broadcastId: string) {
+    if (!confirm("Send this broadcast to all enabled subscribers with a phone number?")) return;
+    setSendingId(broadcastId);
+    setSendResult(null);
+    try {
+      const res = await fetch("/api/send", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ broadcastId }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setSendResult({ id: broadcastId, ...data });
+        fetchBroadcasts();
+      }
+    } catch {
+      // ignore
+    }
+    setSendingId(null);
+  }
 
   const filtered = broadcasts
     .filter((b) => statusFilter === "all" || b.status === statusFilter)
@@ -101,7 +130,8 @@ export default function BroadcastsPage() {
         {filtered.map((bc) => (
           <div
             key={bc.id}
-            className="flex items-center px-5 py-4 gap-3.5 border-b border-border-light last:border-b-0"
+            onClick={() => router.push(`/admin/broadcasts/${bc.id}`)}
+            className="flex items-center px-5 py-4 gap-3.5 border-b border-border-light last:border-b-0 cursor-pointer hover:bg-surface/50 transition-colors"
           >
             {/* Icon */}
             <div className={`w-10 h-10 rounded-[10px] flex items-center justify-center flex-shrink-0 ${
@@ -154,6 +184,11 @@ export default function BroadcastsPage() {
 
             {/* Right side */}
             <div className="flex items-center gap-2.5 flex-shrink-0">
+              {sendResult?.id === bc.id && (
+                <span className="text-sm text-sage">
+                  {sendResult.sent} sent{sendResult.failed > 0 ? `, ${sendResult.failed} failed` : ""}
+                </span>
+              )}
               {bc.status === "scheduled" && bc.scheduledAt && (
                 <span className="text-sm text-muted">
                   In {formatDistanceToNow(new Date(bc.scheduledAt))}
@@ -161,6 +196,16 @@ export default function BroadcastsPage() {
               )}
               {bc.status === "sent" && bc._count.deliveries > 0 && (
                 <span className="text-sm text-muted">{bc._count.deliveries} delivered</span>
+              )}
+              {(bc.status === "draft" || bc.status === "scheduled") && (
+                <button
+                  onClick={(e) => { e.stopPropagation(); handleSend(bc.id); }}
+                  disabled={sendingId === bc.id}
+                  className="inline-flex items-center gap-1.5 px-3.5 py-1.5 bg-terracotta text-white rounded-lg text-xs font-medium hover:bg-terracotta/90 disabled:opacity-50 transition-colors"
+                >
+                  <Send size={12} />
+                  {sendingId === bc.id ? "Sending..." : "Send"}
+                </button>
               )}
               <span className={`text-xs font-medium px-2.5 py-1 rounded-full ${
                 bc.status === "sent"

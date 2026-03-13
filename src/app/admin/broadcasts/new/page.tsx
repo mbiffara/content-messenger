@@ -3,22 +3,38 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { ChevronLeft, ImageIcon, Send, Clock } from "lucide-react";
+import { ChevronLeft, ImageIcon, Send, Clock, Music, X } from "lucide-react";
+
+async function uploadFile(file: File): Promise<{ url: string; filePath: string; originalName: string }> {
+  const form = new FormData();
+  form.append("file", file);
+  const res = await fetch("/api/upload", { method: "POST", body: form });
+  if (!res.ok) throw new Error("Upload failed");
+  return res.json();
+}
 
 export default function NewBroadcastPage() {
   const router = useRouter();
   const [title, setTitle] = useState("");
   const [body, setBody] = useState("");
   const [imageFile, setImageFile] = useState<File | null>(null);
+  const [audioFile, setAudioFile] = useState<File | null>(null);
   const [deliveryMode, setDeliveryMode] = useState<"now" | "schedule">("now");
   const [scheduledDate, setScheduledDate] = useState("");
   const [scheduledTime, setScheduledTime] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
-  async function handleSubmit() {
+  const [sending, setSending] = useState(false);
+  const [sendResult, setSendResult] = useState<{ sent: number; failed: number } | null>(null);
+
+  async function handleSubmit(sendImmediately = false) {
     if (!title.trim()) {
       setError("Title is required");
+      return;
+    }
+    if (sendImmediately && !body?.trim() && !imageFile && !audioFile) {
+      setError("Add a message, image, or audio to send");
       return;
     }
     if (deliveryMode === "schedule" && (!scheduledDate || !scheduledTime)) {
@@ -29,31 +45,78 @@ export default function NewBroadcastPage() {
     setSaving(true);
     setError("");
 
-    const status = deliveryMode === "schedule" ? "scheduled" : "draft";
-    const scheduledAt =
-      deliveryMode === "schedule"
-        ? new Date(`${scheduledDate}T${scheduledTime}`).toISOString()
-        : null;
+    try {
+      // Upload files first
+      let imageUrl: string | null = null;
+      let audioUrl: string | null = null;
+      let audioFileName: string | null = null;
 
-    const res = await fetch("/api/broadcasts", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        title,
-        body: body || null,
-        status,
-        scheduledAt,
-      }),
-    });
+      if (imageFile) {
+        const result = await uploadFile(imageFile);
+        imageUrl = result.url;
+      }
+      if (audioFile) {
+        const result = await uploadFile(audioFile);
+        audioUrl = result.url;
+        audioFileName = result.originalName;
+      }
 
-    if (!res.ok) {
-      const data = await res.json();
-      setError(data.error || "Failed to create broadcast");
+      const status = deliveryMode === "schedule" ? "scheduled" : "draft";
+      const scheduledAt =
+        deliveryMode === "schedule"
+          ? new Date(`${scheduledDate}T${scheduledTime}`).toISOString()
+          : null;
+
+      const res = await fetch("/api/broadcasts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title,
+          body: body || null,
+          imageUrl,
+          audioUrl,
+          audioFileName,
+          status,
+          scheduledAt,
+        }),
+      });
+
+      if (!res.ok) {
+        const data = await res.json();
+        setError(data.error || "Failed to create broadcast");
+        setSaving(false);
+        return;
+      }
+
+      const broadcast = await res.json();
+
+      if (sendImmediately) {
+        setSaving(false);
+        setSending(true);
+        setSendResult(null);
+
+        const sendRes = await fetch("/api/send", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ broadcastId: broadcast.id }),
+        });
+        const result = await sendRes.json();
+        if (sendRes.ok) {
+          setSendResult(result);
+          setTimeout(() => router.push("/admin/broadcasts"), 2000);
+        } else {
+          setError(result.error || "Failed to send broadcast");
+        }
+        setSending(false);
+        return;
+      }
+
+      router.push("/admin/broadcasts");
+    } catch {
+      setError("Something went wrong — check your connection");
       setSaving(false);
-      return;
+      setSending(false);
     }
-
-    router.push("/admin/broadcasts");
   }
 
   return (
@@ -77,7 +140,7 @@ export default function NewBroadcastPage() {
           <div>
             <h2 className="font-display text-[28px] font-bold text-ink">New Broadcast</h2>
             <p className="text-muted text-sm mt-1">
-              Send a one-time message to all active subscribers
+              Send a one-time message to all enabled subscribers
             </p>
           </div>
 
@@ -118,18 +181,54 @@ export default function NewBroadcastPage() {
               <label className="text-[13px] font-medium text-ink tracking-wide">Image</label>
               <span className="text-[11px] text-muted uppercase tracking-wider">Optional</span>
             </div>
-            <label className="flex items-center gap-3 px-4 py-3.5 bg-white border border-dashed border-border rounded-lg cursor-pointer hover:border-muted transition-colors">
-              <ImageIcon size={22} className="text-muted" strokeWidth={1.5} />
-              <span className="text-sm text-muted">
-                {imageFile ? imageFile.name : "Drop an image or click to upload"}
-              </span>
-              <input
-                type="file"
-                accept="image/*"
-                className="hidden"
-                onChange={(e) => setImageFile(e.target.files?.[0] || null)}
-              />
-            </label>
+            {imageFile ? (
+              <div className="flex items-center gap-3 px-4 py-3 bg-white border border-border rounded-lg">
+                <ImageIcon size={18} className="text-muted" strokeWidth={1.5} />
+                <span className="text-sm text-ink flex-1 truncate">{imageFile.name}</span>
+                <button onClick={() => setImageFile(null)} className="text-muted hover:text-ink">
+                  <X size={16} />
+                </button>
+              </div>
+            ) : (
+              <label className="flex items-center gap-3 px-4 py-3.5 bg-white border border-dashed border-border rounded-lg cursor-pointer hover:border-muted transition-colors">
+                <ImageIcon size={22} className="text-muted" strokeWidth={1.5} />
+                <span className="text-sm text-muted">Click to upload an image</span>
+                <input
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  onChange={(e) => setImageFile(e.target.files?.[0] || null)}
+                />
+              </label>
+            )}
+          </div>
+
+          {/* Audio upload */}
+          <div>
+            <div className="flex items-center gap-1.5 mb-1.5">
+              <label className="text-[13px] font-medium text-ink tracking-wide">Audio</label>
+              <span className="text-[11px] text-muted uppercase tracking-wider">Optional</span>
+            </div>
+            {audioFile ? (
+              <div className="flex items-center gap-3 px-4 py-3 bg-white border border-border rounded-lg">
+                <Music size={18} className="text-muted" strokeWidth={1.5} />
+                <span className="text-sm text-ink flex-1 truncate">{audioFile.name}</span>
+                <button onClick={() => setAudioFile(null)} className="text-muted hover:text-ink">
+                  <X size={16} />
+                </button>
+              </div>
+            ) : (
+              <label className="flex items-center gap-3 px-4 py-3.5 bg-white border border-dashed border-border rounded-lg cursor-pointer hover:border-muted transition-colors">
+                <Music size={22} className="text-muted" strokeWidth={1.5} />
+                <span className="text-sm text-muted">Click to upload an audio file</span>
+                <input
+                  type="file"
+                  accept="audio/*"
+                  className="hidden"
+                  onChange={(e) => setAudioFile(e.target.files?.[0] || null)}
+                />
+              </label>
+            )}
           </div>
 
           {/* Delivery timing */}
@@ -151,7 +250,7 @@ export default function NewBroadcastPage() {
                 <div>
                   <p className="text-sm font-medium">Send now</p>
                   <p className={`text-[12px] mt-0.5 ${deliveryMode === "now" ? "text-white/60" : "text-muted"}`}>
-                    Save as draft, send manually
+                    Send immediately to all subscribers
                   </p>
                 </div>
               </button>
@@ -192,22 +291,49 @@ export default function NewBroadcastPage() {
             )}
           </div>
 
+          {/* Send result */}
+          {sendResult && (
+            <div className="bg-sage/10 text-sage px-4 py-3 rounded-lg text-sm">
+              Broadcast sent! {sendResult.sent} delivered{sendResult.failed > 0 ? `, ${sendResult.failed} failed` : ""}
+            </div>
+          )}
+
           {/* Actions */}
-          <div className="flex items-center gap-3 pt-2">
-            <button
-              onClick={handleSubmit}
-              disabled={saving}
-              className="px-7 py-3 bg-ink text-white rounded-lg text-sm font-semibold hover:bg-ink/90 disabled:opacity-50 transition-colors"
-            >
-              {deliveryMode === "schedule" ? "Schedule Broadcast" : "Save as Draft"}
-            </button>
-            <Link
-              href="/admin/broadcasts"
-              className="px-7 py-3 border border-border rounded-lg text-sm font-medium text-ink hover:bg-surface transition-colors"
-            >
-              Cancel
-            </Link>
-          </div>
+          {!sendResult && (
+            <div className="flex items-center gap-3 pt-2">
+              {deliveryMode === "now" ? (
+                <button
+                  onClick={() => handleSubmit(true)}
+                  disabled={saving || sending}
+                  className="inline-flex items-center gap-2 px-7 py-3 bg-terracotta text-white rounded-lg text-sm font-semibold hover:bg-terracotta/90 disabled:opacity-50 transition-colors"
+                >
+                  <Send size={15} />
+                  {saving ? "Uploading..." : sending ? "Sending..." : "Send Now"}
+                </button>
+              ) : (
+                <button
+                  onClick={() => handleSubmit(false)}
+                  disabled={saving}
+                  className="px-7 py-3 bg-ink text-white rounded-lg text-sm font-semibold hover:bg-ink/90 disabled:opacity-50 transition-colors"
+                >
+                  {saving ? "Saving..." : "Schedule Broadcast"}
+                </button>
+              )}
+              <button
+                onClick={() => handleSubmit(false)}
+                disabled={saving || sending}
+                className="px-7 py-3 border border-border rounded-lg text-sm font-medium text-ink hover:bg-surface disabled:opacity-50 transition-colors"
+              >
+                Save Draft
+              </button>
+              <Link
+                href="/admin/broadcasts"
+                className="text-sm text-muted hover:text-ink transition-colors"
+              >
+                Cancel
+              </Link>
+            </div>
+          )}
         </div>
 
         {/* WhatsApp Preview */}
@@ -224,22 +350,57 @@ export default function NewBroadcastPage() {
               </div>
             </div>
             <div className="p-3 space-y-2 min-h-[200px]">
-              {(body || imageFile) ? (
-                <div className="bg-white rounded-r-lg rounded-bl-lg max-w-[220px] overflow-hidden">
+              {(body || imageFile || audioFile) ? (
+                <>
+                  {/* Image message */}
                   {imageFile && (
-                    <div className="w-full h-[100px] bg-[#E8E4DF] flex items-center justify-center">
-                      <ImageIcon size={24} className="text-[#B0B0A8]" />
+                    <div className="bg-white rounded-r-lg rounded-bl-lg max-w-[220px] overflow-hidden">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src={URL.createObjectURL(imageFile)} alt="" className="w-full object-cover max-h-[160px]" />
+                      {body && !audioFile && (
+                        <div className="px-2.5 py-2">
+                          <p className="text-[12px] text-ink leading-[17px]">
+                            {body.length > 80 ? body.slice(0, 80) + "..." : body}
+                          </p>
+                          <p className="text-[10px] text-muted text-right mt-1">9:00 AM</p>
+                        </div>
+                      )}
+                      {!body && (
+                        <div className="px-2.5 py-1">
+                          <p className="text-[10px] text-muted text-right">9:00 AM</p>
+                        </div>
+                      )}
                     </div>
                   )}
-                  {body && (
-                    <div className="px-2.5 py-2">
+
+                  {/* Audio message */}
+                  {audioFile && (
+                    <div className="bg-white rounded-r-lg rounded-bl-lg max-w-[220px] px-2.5 py-2">
+                      <div className="flex items-center gap-2">
+                        <div className="w-8 h-8 rounded-full bg-sage/20 flex items-center justify-center flex-shrink-0">
+                          <Music size={14} className="text-sage" />
+                        </div>
+                        <div className="flex-1">
+                          <div className="h-1 bg-[#E8E4DF] rounded-full">
+                            <div className="h-1 bg-sage/40 rounded-full w-1/3" />
+                          </div>
+                          <p className="text-[10px] text-muted mt-1">0:00</p>
+                        </div>
+                      </div>
+                      <p className="text-[10px] text-muted text-right">9:00 AM</p>
+                    </div>
+                  )}
+
+                  {/* Text-only message (or text with audio) */}
+                  {body && !imageFile && (
+                    <div className="bg-white rounded-r-lg rounded-bl-lg max-w-[220px] px-2.5 py-2">
                       <p className="text-[12px] text-ink leading-[17px]">
                         {body.length > 100 ? body.slice(0, 100) + "..." : body}
                       </p>
                       <p className="text-[10px] text-muted text-right mt-1">9:00 AM</p>
                     </div>
                   )}
-                </div>
+                </>
               ) : (
                 <div className="bg-white rounded-r-lg rounded-bl-lg max-w-[220px] p-2.5">
                   <p className="text-[12px] text-muted leading-[17px]">

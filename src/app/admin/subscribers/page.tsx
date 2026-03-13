@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
+import { useSession } from "next-auth/react";
 
 interface Subscriber {
   id: string;
@@ -15,9 +16,13 @@ interface Subscriber {
 }
 
 export default function SubscribersPage() {
+  const { data: session } = useSession();
+  const canSync = session?.user?.role === "super_admin" || session?.user?.role === "account_admin";
+
   const [subscribers, setSubscribers] = useState<Subscriber[]>([]);
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
+  const [syncStep, setSyncStep] = useState<string | null>(null);
   const [syncResult, setSyncResult] = useState<string | null>(null);
   const [editingPhone, setEditingPhone] = useState<string | null>(null);
   const [phoneValue, setPhoneValue] = useState("");
@@ -25,10 +30,72 @@ export default function SubscribersPage() {
   const [statusFilter, setStatusFilter] = useState("all");
   const [expandedRow, setExpandedRow] = useState<string | null>(null);
   const [lastSynced, setLastSynced] = useState<Date | null>(null);
+  const [actionsOpen, setActionsOpen] = useState(false);
+  const [deleteModalOpen, setDeleteModalOpen] = useState(false);
+  const [deleteConfirmText, setDeleteConfirmText] = useState("");
+  const [deleting, setDeleting] = useState(false);
+  const [addModalOpen, setAddModalOpen] = useState(false);
+  const [addForm, setAddForm] = useState({ email: "", name: "", phone: "" });
+  const [addError, setAddError] = useState<string | null>(null);
+  const [adding, setAdding] = useState(false);
+  const actionsRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     fetchSubscribers();
   }, []);
+
+  useEffect(() => {
+    function handleClickOutside(e: MouseEvent) {
+      if (actionsRef.current && !actionsRef.current.contains(e.target as Node)) {
+        setActionsOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  async function handleDeleteAll() {
+    setDeleting(true);
+    try {
+      const res = await fetch("/api/subscribers", { method: "DELETE" });
+      const data = await res.json();
+      if (res.ok) {
+        setSyncResult(`Deleted ${data.deleted} subscribers`);
+        fetchSubscribers();
+      } else {
+        setSyncResult(data.error || "Delete failed");
+      }
+    } catch {
+      setSyncResult("Delete failed");
+    }
+    setDeleting(false);
+    setDeleteModalOpen(false);
+    setDeleteConfirmText("");
+  }
+
+  async function handleAddSubscriber() {
+    if (!addForm.email) return;
+    setAdding(true);
+    setAddError(null);
+    try {
+      const res = await fetch("/api/subscribers", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(addForm),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setAddModalOpen(false);
+        setAddForm({ email: "", name: "", phone: "" });
+        fetchSubscribers();
+      } else {
+        setAddError(data.error || "Failed to add subscriber");
+      }
+    } catch {
+      setAddError("Failed to add subscriber");
+    }
+    setAdding(false);
+  }
 
   function fetchSubscribers() {
     setLoading(true);
@@ -41,20 +108,56 @@ export default function SubscribersPage() {
   async function handleSync() {
     setSyncing(true);
     setSyncResult(null);
+    setSyncStep(null);
     try {
       const res = await fetch("/api/subscribers/sync", { method: "POST" });
-      const data = await res.json();
-      if (res.ok) {
-        setSyncResult(`Synced ${data.synced} members (${data.created} new, ${data.updated} updated)`);
-        setLastSynced(new Date());
-        fetchSubscribers();
+
+      if (res.headers.get("content-type")?.includes("text/event-stream")) {
+        const reader = res.body!.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+
+          const lines = buffer.split("\n\n");
+          buffer = lines.pop() || "";
+
+          for (const line of lines) {
+            const match = line.match(/^data: (.+)$/);
+            if (!match) continue;
+            const data = JSON.parse(match[1]);
+
+            if (data.step) {
+              setSyncStep(data.step);
+            }
+            if (data.done) {
+              setSyncResult(`Synced ${data.synced} members (${data.created} new, ${data.updated} updated, ${data.deactivated || 0} deactivated)`);
+              setLastSynced(new Date());
+              fetchSubscribers();
+            }
+            if (data.error) {
+              setSyncResult(data.error);
+            }
+          }
+        }
       } else {
-        setSyncResult(data.error || "Sync failed");
+        const data = await res.json();
+        if (res.ok) {
+          setSyncResult(`Synced ${data.synced} members (${data.created} new, ${data.updated} updated)`);
+          setLastSynced(new Date());
+          fetchSubscribers();
+        } else {
+          setSyncResult(data.error || "Sync failed");
+        }
       }
     } catch {
       setSyncResult("Sync failed — check your connection settings");
     }
     setSyncing(false);
+    setSyncStep(null);
   }
 
   async function updatePhone(id: string) {
@@ -114,6 +217,30 @@ export default function SubscribersPage() {
           <h2 className="font-display text-[28px] font-bold text-ink">Subscribers</h2>
         </div>
         <div className="flex items-center gap-3">
+          {/* Actions dropdown */}
+          <div className="relative" ref={actionsRef}>
+            <button
+              onClick={() => setActionsOpen(!actionsOpen)}
+              className="inline-flex items-center justify-center w-10 h-10 border border-border rounded-lg text-muted hover:bg-surface hover:text-ink transition-colors"
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                <circle cx="12" cy="5" r="2"/>
+                <circle cx="12" cy="12" r="2"/>
+                <circle cx="12" cy="19" r="2"/>
+              </svg>
+            </button>
+            {actionsOpen && (
+              <div className="absolute right-0 top-full mt-1 w-48 bg-white border border-border-light rounded-lg shadow-lg z-10 py-1">
+                <button
+                  onClick={() => { setDeleteModalOpen(true); setActionsOpen(false); }}
+                  className="w-full text-left px-4 py-2.5 text-sm text-terracotta hover:bg-terracotta/5 transition-colors"
+                >
+                  Delete All Subscribers
+                </button>
+              </div>
+            )}
+          </div>
+
           <button
             onClick={handleSync}
             disabled={syncing}
@@ -126,7 +253,10 @@ export default function SubscribersPage() {
             </svg>
             {syncing ? "Syncing..." : "Sync Subscribers"}
           </button>
-          <button className="inline-flex items-center gap-2 px-5 py-2.5 bg-terracotta text-white rounded-lg text-sm font-medium hover:bg-terracotta/90 transition-colors">
+          <button
+            onClick={() => { setAddModalOpen(true); setAddError(null); }}
+            className="inline-flex items-center gap-2 px-5 py-2.5 bg-terracotta text-white rounded-lg text-sm font-medium hover:bg-terracotta/90 transition-colors"
+          >
             Add Manually
           </button>
         </div>
@@ -166,10 +296,21 @@ export default function SubscribersPage() {
           <option value="whatsapp">WhatsApp ready</option>
         </select>
 
-        {lastSynced && (
+        {(syncing || lastSynced) && (
           <div className="ml-auto flex items-center gap-2 text-sm text-muted">
-            <span className="w-2 h-2 rounded-full bg-sage" />
-            Last synced {formatLastSynced()}
+            {syncing ? (
+              <>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="animate-spin">
+                  <path d="M21 12a9 9 0 1 1-6.219-8.56"/>
+                </svg>
+                <span>{syncStep || "Starting sync..."}</span>
+              </>
+            ) : (
+              <>
+                <span className="w-2 h-2 rounded-full bg-sage" />
+                Last synced {formatLastSynced()}
+              </>
+            )}
           </div>
         )}
       </div>
@@ -334,6 +475,106 @@ export default function SubscribersPage() {
           </div>
         )}
       </div>
+
+      {/* Delete All Modal */}
+      {deleteModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div className="absolute inset-0 bg-ink/40" onClick={() => { setDeleteModalOpen(false); setDeleteConfirmText(""); }} />
+          <div className="relative bg-white rounded-xl shadow-xl w-[420px] p-6">
+            <h3 className="font-display text-lg font-bold text-ink">Delete All Subscribers</h3>
+            <p className="text-sm text-muted mt-2">
+              This will permanently delete all subscribers and their delivery history. This action cannot be undone.
+            </p>
+            <p className="text-sm text-ink mt-4">
+              Type <span className="font-mono font-semibold text-terracotta">delete all</span> to confirm:
+            </p>
+            <input
+              type="text"
+              value={deleteConfirmText}
+              onChange={(e) => setDeleteConfirmText(e.target.value)}
+              className="w-full mt-2 px-3.5 py-2.5 border border-border rounded-lg text-sm text-ink placeholder:text-muted focus:outline-none focus:ring-2 focus:ring-terracotta/20 focus:border-terracotta/40"
+              placeholder="delete all"
+              autoFocus
+            />
+            <div className="flex justify-end gap-3 mt-5">
+              <button
+                onClick={() => { setDeleteModalOpen(false); setDeleteConfirmText(""); }}
+                className="px-4 py-2 text-sm font-medium text-ink hover:bg-surface rounded-lg transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleDeleteAll}
+                disabled={deleteConfirmText !== "delete all" || deleting}
+                className="px-4 py-2 text-sm font-semibold text-white bg-terracotta rounded-lg hover:bg-terracotta/90 disabled:opacity-40 transition-colors"
+              >
+                {deleting ? "Deleting..." : "Delete All"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Add Subscriber Modal */}
+      {addModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div className="absolute inset-0 bg-ink/40" onClick={() => { setAddModalOpen(false); setAddForm({ email: "", name: "", phone: "" }); setAddError(null); }} />
+          <div className="relative bg-white rounded-xl shadow-xl w-[420px] p-6">
+            <h3 className="font-display text-lg font-bold text-ink">Add Subscriber</h3>
+            <div className="mt-4 space-y-3">
+              <div>
+                <label className="block text-[13px] font-medium text-ink mb-1">Email</label>
+                <input
+                  type="email"
+                  value={addForm.email}
+                  onChange={(e) => setAddForm({ ...addForm, email: e.target.value })}
+                  className="w-full px-3.5 py-2.5 border border-border rounded-lg text-sm text-ink placeholder:text-muted focus:outline-none focus:ring-2 focus:ring-ink/10 focus:border-ink/30"
+                  placeholder="email@example.com"
+                  autoFocus
+                />
+              </div>
+              <div>
+                <label className="block text-[13px] font-medium text-ink mb-1">Name</label>
+                <input
+                  type="text"
+                  value={addForm.name}
+                  onChange={(e) => setAddForm({ ...addForm, name: e.target.value })}
+                  className="w-full px-3.5 py-2.5 border border-border rounded-lg text-sm text-ink placeholder:text-muted focus:outline-none focus:ring-2 focus:ring-ink/10 focus:border-ink/30"
+                  placeholder="John Doe"
+                />
+              </div>
+              <div>
+                <label className="block text-[13px] font-medium text-ink mb-1">Phone</label>
+                <input
+                  type="tel"
+                  value={addForm.phone}
+                  onChange={(e) => setAddForm({ ...addForm, phone: e.target.value })}
+                  className="w-full px-3.5 py-2.5 border border-border rounded-lg text-sm text-ink placeholder:text-muted focus:outline-none focus:ring-2 focus:ring-ink/10 focus:border-ink/30"
+                  placeholder="+1234567890"
+                />
+              </div>
+            </div>
+            {addError && (
+              <p className="text-sm text-terracotta mt-3">{addError}</p>
+            )}
+            <div className="flex justify-end gap-3 mt-5">
+              <button
+                onClick={() => { setAddModalOpen(false); setAddForm({ email: "", name: "", phone: "" }); setAddError(null); }}
+                className="px-4 py-2 text-sm font-medium text-ink hover:bg-surface rounded-lg transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleAddSubscriber}
+                disabled={!addForm.email || adding}
+                className="px-4 py-2 text-sm font-semibold text-white bg-ink rounded-lg hover:bg-ink/90 disabled:opacity-40 transition-colors"
+              >
+                {adding ? "Adding..." : "Add Subscriber"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

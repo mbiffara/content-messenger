@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { Plus, GripVertical, Volume2, Image, MessageSquare } from "lucide-react";
 
 interface Lesson {
@@ -20,6 +21,7 @@ export default function LessonsPage() {
   const [loading, setLoading] = useState(true);
   const [sortAsc, setSortAsc] = useState(true);
   const [statusFilter, setStatusFilter] = useState("all");
+  const router = useRouter();
   const [dragIndex, setDragIndex] = useState<number | null>(null);
   const [overIndex, setOverIndex] = useState<number | null>(null);
 
@@ -118,9 +120,17 @@ export default function LessonsPage() {
             onDragOver={(e) => { e.preventDefault(); setOverIndex(idx); }}
             onDrop={() => dragIndex !== null && handleDrop(dragIndex, idx)}
             onDragEnd={() => { setDragIndex(null); setOverIndex(null); }}
-            className={`flex items-center px-5 py-4 gap-3.5 border-b border-border-light last:border-b-0 transition-colors ${
+            onClick={() => {
+              if (dragIndex === null) {
+                router.push(lesson.status === "draft"
+                  ? `/admin/lessons/${lesson.id}/edit`
+                  : `/admin/lessons/${lesson.id}`
+                );
+              }
+            }}
+            className={`flex items-center px-5 py-4 gap-3.5 border-b border-border-light last:border-b-0 cursor-pointer hover:bg-surface/50 transition-colors ${
               overIndex === idx ? "bg-surface" : ""
-            } ${lesson.status === "published" && lesson._count.deliveries > 0 && false ? "bg-terracotta/[0.03]" : ""}`}
+            }`}
           >
             {/* Drag handle */}
             <div className="text-muted/40 cursor-grab active:cursor-grabbing flex-shrink-0">
