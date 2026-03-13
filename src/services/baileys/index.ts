@@ -1,3 +1,6 @@
+import { config } from "dotenv";
+config();
+
 import express from "express";
 import cron from "node-cron";
 import { SessionManager } from "./session-manager";
@@ -89,7 +92,7 @@ app.post("/sessions/:id/send-media", async (req, res) => {
   }
 });
 
-const APP_URL = process.env.APP_URL || "http://localhost:3005";
+const APP_URL = process.env.APP_URL || "http://127.0.0.1:3005";
 const CRON_SECRET = process.env.NEXTAUTH_SECRET || "";
 
 // Run every minute — the cron endpoint handles time-gating for lessons
